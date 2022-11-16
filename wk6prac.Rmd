@@ -1,0 +1,208 @@
+---
+title: "wk6prac"
+output: html_document
+date: "2022-11-16"
+---
+
+## Key Advice
+
+Select points or polygons in a polygon = Selecting data by location = spatial sub-setting
+
+Determine where datasets overlap (or touch, or don’t overlap) and extract those parts = spatial clipping
+
+Join two spatial datasets together = spatial joining, which can use spatial subsetting functions as the default is st_intersects(). This function joins spatial data.
+
+Select data by attributes = filtering or selecting rows / columns with dplyr
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Libraries
+
+```{r libraries}
+library(spatstat)
+library(here)
+library(sp)
+library(rgeos)
+library(maptools)
+library(tmap)
+library(sf)
+library(geojson)
+library(geojsonio)
+library(tmaptools)
+library(tidyverse)
+library(dplyr)
+library(stringr)
+library(sf)
+```
+
+## Read in Data
+
+```{r pressure, echo=FALSE}
+
+LondonBoroughs <- st_read("https://opendata.arcgis.com/datasets/8edafbe3276d4b56aec60991cbddda50_4.geojson") %>% 
+  st_transform(., 27700)
+  
+BluePlaques <- st_read("https://s3.eu-west-2.amazonaws.com/openplaques/open-plaques-london-2018-04-08.geojson") %>% 
+  st_transform(., 27700)
+
+OSM <- st_read(here::here("prac6_data", "greater-london-latest-free.shp",   "gis_osm_pois_a_free_1.shp")) %>%
+  st_transform(., 27700) %>%
+  filter(fclass == 'hotel')
+
+Londonborough <- st_read("/Users/martignoni/Documents/CASA/GIS/wk1/statistical-gis-boundaries-london/ESRI/London_Borough_Excluding_MHW.shp") %>% 
+  st_transform(.,27700)
+
+```
+
+## Setting Up Data
+
+```{r}
+
+#Filtering Data
+BoroughMap <- LondonBoroughs %>% 
+  dplyr::filter(str_detect(lad15cd, "^E09"))
+
+#Checking the Maps
+qtm(BoroughMap)
+
+tmap_mode("plot")
+tm_shape(BoroughMap) + tm_polygons(col = NA, alpha = 0.5) + tm_shape(BluePlaques) + tm_dots(col = "blue")
+
+#Cleaning Data
+BluePlaques <-  distinct(BluePlaques)
+
+#Spatial Subsetting
+BluePlaquesSub <- BluePlaques[BoroughMap,]
+#This tells R to select for the points located within the BoroughMap geometry
+
+tmap_mode("plot")
+tm_shape(BoroughMap)+tm_polygons(col=NA, alpha=0.5)+tm_shape(BluePlaquesSub)+tm_dots(col="blue")
+
+intersect_indices <-st_intersects(BoroughMap, BluePlaques)
+  
+```
+
+## Spatial Clipping
+
+```{r}
+
+Londonborough <- st_read("/Users/martignoni/Documents/CASA/GIS/wk1/statistical-gis-boundaries-london/ESRI/London_Borough_Excluding_MHW.shp") %>% 
+  st_transform(.,27700)
+
+```
+
+## Spatial Joining
+
+```{r}
+#Do an example of a spatial join (the OSM and landmark(Hotels) data)
+join_example <- st_join(OSM, Londonborough)
+nrow(join_example)
+
+# Now, we're going to read in the .csv BUT the data is weird so we gotta make the coordinate system into lon/lat and therefore make it inot spatial data
+
+Airbnb <- read_csv("/Users/martignoni/Documents/CASA/GIS/wk5/wk5prac/wk5_data/listings.csv") %>%
+  st_as_sf(., coords = c("longitude", "latitude"),crs = 4326) %>% 
+  st_transform(., 27700)%>%
+  filter(room_type == 'Entire home/apt' & availability_365 =='365')
+
+
+# A function for the join functions are covered in practical 7
+
+Joinfun <- function(data1, data2){
+output<- data1%>%
+  st_join(Londonborough,.) %>%
+  add_count(GSS_CODE, name="hotels_in_borough") 
+  return(output)}
+
+# function for hotels
+Hotels <- Joinfun(OSM, Londonborough)
+
+# function for airbnb
+Airbnb <- Joinfun(Airbnb, Londonborough)
+ 
+Hotels <- Hotels %>%
+  #at the moment each hotel is a row for the borough
+  #we just one one row that has number of airbnbs
+  group_by(., GSS_CODE, NAME)%>%
+  summarise('Accomodation count' = unique(hotels_in_borough))
+
+Airbnb <- Airbnb %>%
+  group_by(., GSS_CODE, NAME)%>%
+  summarise('Accomodation count' = unique(hotels_in_borough))
+
+all_accomodation <- st_join(Hotels, Airbnb)
+head(all_accomodation) #the st_join does not quite work here because name.x and name.y don't match. st_join is a left join, here the left table is hotels. SO, use st_equals
+
+all_accomodation1 <- st_equals(Hotels, Airbnb)
+```
+
+## Study Area - zooming in
+
+```{r}
+#Select specifically for the Borough of Harrow because it will be easier to focus on one of them
+Harrow <- BoroughMap %>%
+  filter(., lad15nm=="Harrow")
+
+#check to see you've selected harrow
+tm_shape(Harrow) + tm_polygons(col = NA, alpha = 0.5)
+
+#clip the blue plaques data
+BluePlaquesSub <- BluePlaques[Harrow,]
+tmap_mode("plot")
+tm_shape(Harrow)+tm_polygons(col=NA, alpha=0.5)+tm_shape(BluePlaquesSub)+tm_dots(col="blue")
+
+#Now, we now want to look at spatial stats (spatstat package) and to do that we need a window
+window <- as.owin(Harrow)
+plot(window)
+
+#spatstat doesn't work with sp or sf, it uses its own datatype: ppp (point pattern object). First we make a sp object, then a ppp.
+BluePlaquesSub <- BluePlaquesSub %>% 
+  as(., 'Spatial')
+
+BluePlaquesSub.ppp <- ppp(x=BluePlaquesSub@coords[,1], y=BluePlaquesSub@coords[,2], window=window) #makes the ppp
+
+#Now to visualise the ppp
+BluePlaquesSub.ppp %>% 
+  plot(.,pch=16,cex=0.5, main="Blue Plaques Harrow")
+
+```
+
+## Point Pattern Analysis
+
+```{r}
+#This is a Kernel Density Estimation (KDE) map; sigma value sets the diameter of the Kernel
+BluePlaquesSub.ppp %>% 
+  density(., sigma=500) %>% 
+  plot()
+
+#Quadrat Analysis
+
+#First, plot points:
+plot(BluePlaquesSub.ppp, pch=16,cex=0.5, main="Blue Plaques in Harrow")
+
+#Second, count the points in that fall in a 6 x 6 grid overlaid across the window
+BluePlaquesSub.ppp %>% 
+  quadratcount(., nx=6, ny=6) %>% 
+  plot(., add=T, col="red")
+
+#quadratcount can also give us a table of the counts
+Qcount <- BluePlaquesSub.ppp %>%
+  quadratcount(.,nx = 6, ny = 6) %>%
+  as.data.frame() %>%
+  dplyr::count(Var1=Freq)%>%
+  dplyr::rename(Freqquadratcount=n)
+
+Qcount %>% 
+  summarise_all(class)
+
+```
+
+## Density-based spatial clustering of applications with noise: DBSCAN
+
+```{r}
+
+```
+
+
