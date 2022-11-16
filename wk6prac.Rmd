@@ -4,7 +4,7 @@ output: html_document
 date: "2022-11-16"
 ---
 
-## Key Advice
+# Key Advice
 
 Select points or polygons in a polygon = Selecting data by location = spatial sub-setting
 
@@ -18,7 +18,7 @@ Select data by attributes = filtering or selecting rows / columns with dplyr
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## Libraries
+# Libraries
 
 ```{r libraries}
 library(spatstat)
@@ -37,7 +37,7 @@ library(stringr)
 library(sf)
 ```
 
-## Read in Data
+# Read in Data
 
 ```{r pressure, echo=FALSE}
 
@@ -56,7 +56,7 @@ Londonborough <- st_read("/Users/martignoni/Documents/CASA/GIS/wk1/statistical-g
 
 ```
 
-## Setting Up Data
+# Setting Up Data
 
 ```{r}
 
@@ -84,7 +84,7 @@ intersect_indices <-st_intersects(BoroughMap, BluePlaques)
   
 ```
 
-## Spatial Clipping
+# Spatial Clipping
 
 ```{r}
 
@@ -93,7 +93,7 @@ Londonborough <- st_read("/Users/martignoni/Documents/CASA/GIS/wk1/statistical-g
 
 ```
 
-## Spatial Joining
+# Spatial Joining
 
 ```{r}
 #Do an example of a spatial join (the OSM and landmark(Hotels) data)
@@ -138,7 +138,7 @@ head(all_accomodation) #the st_join does not quite work here because name.x and 
 all_accomodation1 <- st_equals(Hotels, Airbnb)
 ```
 
-## Study Area - zooming in
+# Study Area - zooming in
 
 ```{r}
 #Select specifically for the Borough of Harrow because it will be easier to focus on one of them
@@ -169,14 +169,18 @@ BluePlaquesSub.ppp %>%
 
 ```
 
-## Point Pattern Analysis
-
+# Point Pattern Analysis
+## Kernel Density Estimation (KDE)
 ```{r}
 #This is a Kernel Density Estimation (KDE) map; sigma value sets the diameter of the Kernel
 BluePlaquesSub.ppp %>% 
   density(., sigma=500) %>% 
   plot()
+```
 
+## Quadrat Analysis
+
+```{r}
 #Quadrat Analysis
 
 #First, plot points:
@@ -186,6 +190,8 @@ plot(BluePlaquesSub.ppp, pch=16,cex=0.5, main="Blue Plaques in Harrow")
 BluePlaquesSub.ppp %>% 
   quadratcount(., nx=6, ny=6) %>% 
   plot(., add=T, col="red")
+
+## ASK ABOUT FROM HERE BELOW ##
 
 #quadratcount can also give us a table of the counts
 Qcount <- BluePlaquesSub.ppp %>%
@@ -197,9 +203,41 @@ Qcount <- BluePlaquesSub.ppp %>%
 Qcount %>% 
   summarise_all(class)
 
+#Now we have a table and we need to check it against the possion distribution
+
+sums <- Qcount %>% #this is the total number of plaques
+  mutate(total=Var1*Freqquadratcount) %>% 
+  dplyr::summarise(across(everything(),sum)) %>% 
+  dplyr::select(-Var1)
+
+lambda <- Qcount %>% #here we are calculating the lambda for the Poisson Dist
+  mutate(total=Var1*Freqquadratcount) %>% 
+  dplyr::summarise(across(everything(), sum)) %>%
+  mutate(lambda=total/Freqquadratcount) %>% 
+  dplyr::select(lambda) %>% 
+  pull(lambda)
+
+QcountTable <- Qcount %>% #here we are calculating the expected count based on the total number of plaques
+  mutate(Pr=((lambda^Var1)*exp(-lambda))/factorial(Var1))%>% 
+  mutate(Expected= (round(Pr * sums$Freqquadratcount, 0)))
+  
+#plot!
+plot(c(1,5),c(0,14), type="n", xlab="Number of Blue Plaques (Red=Observed,Blue=Expected)", ylab="Frequency of Occurances")
+points(QcountTable$Freqquadratcount, col="Red", type="o",  lwd=3)
+points(QcountTable$Expected, col="Blue", type="o", lwd=3)
+
 ```
 
-## Density-based spatial clustering of applications with noise: DBSCAN
+## Ripley’s K
+
+```{r}
+K <- BluePlaquesSub.ppp %>% 
+  Kest(., correction="border") %>% 
+  plot()
+```
+
+
+# Density-based spatial clustering of applications with noise: DBSCAN
 
 ```{r}
 
