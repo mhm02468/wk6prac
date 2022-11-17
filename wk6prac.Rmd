@@ -234,12 +234,104 @@ points(QcountTable$Expected, col="Blue", type="o", lwd=3)
 K <- BluePlaquesSub.ppp %>% 
   Kest(., correction="border") %>% 
   plot()
+
+Kval <- as.data.frame(Kest(BluePlaquesSub.ppp, correction = "Ripley"))
+
 ```
 
 
 # Density-based spatial clustering of applications with noise: DBSCAN
 
+Notes:
+1. Ripley's K and Quadrat Analysis tell us that there is clustering but not *where* the clustering is, so we do DBSCAN (or Optics or HBSCAN)
+
+2. You can use the r found from Ripley's K or Quadrat Analysis for DBSCAN. The biggest bulge in the graph above the poisson dist is at around 700m, so we'll use that.
+
+3. DBSCAN has two parametres: (1) Epsilon - this is the radius within which the algorithm with search for clusters (2) MinPts - this is the minimum number of points that should be considered a cluster
+
+4. Here are the steps in writing the code:
+  (1) extract the points from the spatial points data frame
+  (2) run the dbscan analysis
+  (3) plot the results
+  
+5. We can also use a Knee plot to determine the best epsilon value, that uses kNNdistplot() from dbscan. This plot shows the avg distance for points from "k" neighbours in ascending order, this is where K (dist from neighbours) increases.
+
+6. We can also use ggplot2 to make a much nicer DBSCAN. The steps for this are outlined below.
+
+
 ```{r}
+library(raster)
+library(fpc)
+library(dbscan)
+library(ggplot2)
+library(OpenStreetMap)
+
+st_geometry(BoroughMap) # to check the crs of the polygon
+
+#DBSCAN step 1 (using dbscan package)
+BluePlaquesSubPoints <- BluePlaquesSub %>% 
+  coordinates(.) %>% 
+  as.data.frame()
+
+#DBSCAN step 2 (using dbscan package)
+db <- BluePlaquesSubPoints %>% 
+  fpc::dbscan(., eps = 700, MinPts = 4)
+
+#DBSCAN step 3 (using dbscan package)
+plot(db, BluePlaquesSubPoints, main="DBSCAN Output", frame = F)
+plot(BoroughMap$geometry, add = T)
+
+#Knee plot
+
+BluePlaquesSubPoints %>% 
+  dbscan::kNNdistplot(., k=4)
+
+#Making the DBSCAN using data from Knee Plot
+
+db1 <- BluePlaquesSubPoints %>%
+  fpc::dbscan(.,eps = 500, MinPts = 4)
+
+plot(db1, BluePlaquesSubPoints, main = "DBSCAN Output", frame = F)
+plot(BoroughMap$geometry, add=T)
+
+#Making DBSCAN using ggplot. Here, if we click on the db object, we can see a "cluster" row that we then want to add back to out dataframe.
+
+#DBSCAN step 1 (using ggplot2 package)
+BluePlaquesSubPoints<- BluePlaquesSubPoints %>%
+  mutate(dbcluster=db$cluster)
+
+#DBSCAN step 2 (using ggplot2 package), here we can make convex hull polygons around the clusters.
+chulls <- BluePlaquesSubPoints %>% 
+  group_by(dbcluster) %>% 
+  dplyr::mutate(hull = 1:n(), hull = factor(hull, chull(coords.x1, coords.x1))) %>%
+  arrange(hull)
+
+#DBSCAN step 3 (using ggplot2 package). we need to remove zero from the clusters (in the df) because it just represents what is *not* a cluster
+chulls <- chulls %>% 
+  filter(dbcluster>=1)
+
+#DBSCAN step 4 (using ggplot2 package). Now we make the plot.
+dbplot <- ggplot(data=BluePlaquesSubPoints, aes(coords.x1,coords.x2, colour=dbcluster, fill=dbcluster)) 
+  #add the points in
+dbplot <- dbplot + geom_point()
+  #now the convex hulls
+dbplot <- dbplot + geom_polygon(data = chulls,aes(coords.x1,coords.x2, group=dbcluster),alpha = 0.5) 
+  #now plot, setting the coordinates to scale correctly and as a black and white plot 
+dbplot + theme_bw() + coord_equal()
+
+#DBSCAN step 4 (using ggplot2 package/open stree map). Set a bounding box (in WGS84),convert back to BNG, to add a base map.
+HarrowWGSbb <- Harrow %>% 
+  st_transform(., 4326) %>% 
+  st_bbox()
+
+basemap <- OpenStreetMap::openmap(c(51.5549876,-0.4040502),c(51.6405356,-0.2671315),
+                         zoom=NULL,
+                         "stamen-toner") 
+# convert BACK to bng
+basemap_bng <- openproj(basemap, projection="+init=epsg:27700")
+
+  #now the actual plotting!
+autoplot.OpenStreetMap(basemap_bng)+geom_point(data=BluePlaquesSubPoints, aes(coords.x1,coords.x2, color=dbcluster, fill=dbcluster))+geom_polygon(data=chulls, aes(coords.x1,coords.x2, group=dbcluster, fill=dbcluster), alpha=0.5)
 
 ```
 
