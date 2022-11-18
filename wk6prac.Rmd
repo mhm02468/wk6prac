@@ -209,6 +209,7 @@ sums <- Qcount %>% #this is the total number of plaques
   mutate(total=Var1*Freqquadratcount) %>% 
   dplyr::summarise(across(everything(),sum)) %>% 
   dplyr::select(-Var1)
+# -argument removes the column from the dataframe
 
 lambda <- Qcount %>% #here we are calculating the lambda for the Poisson Dist
   mutate(total=Var1*Freqquadratcount) %>% 
@@ -254,7 +255,7 @@ Notes:
   (2) run the dbscan analysis
   (3) plot the results
   
-5. We can also use a Knee plot to determine the best epsilon value, that uses kNNdistplot() from dbscan. This plot shows the avg distance for points from "k" neighbours in ascending order, this is where K (dist from neighbours) increases.
+5. We can also use a Knee plot to determine the best epsilon value, that uses kNNdistplot() from dbscan. This plot shows the avg distance for points from "k" neighbours in ascending order, this is where K (dist from neighbours) increases. In choosing the knee, you can do the biggest knee or then use it to see what gives the most reasonable clusters. You can also look at the knees to help read ripley's k and what is says for r.
 
 6. We can also use ggplot2 to make a much nicer DBSCAN. The steps for this are outlined below.
 
